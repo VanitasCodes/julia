@@ -572,6 +572,57 @@ void _gc_heap_snapshot_record_array_edge(jl_value_t *from, jl_value_t *to, size_
     _record_gc_edge("element", from, to, index);
 }
 
+void _gc_heap_snapshot_record_array_edge_with_field(jl_value_t *from, jl_value_t *to, void *slot, void *elem_begin) JL_NOTSAFEPOINT
+{
+    jl_datatype_t *memtype = (jl_datatype_t*)jl_typeof(from);
+    jl_value_t *eltype_val = jl_tparam1(memtype);
+    if (!jl_is_datatype(eltype_val)) {
+        _record_gc_edge("element", from, to, gc_slot_to_arrayidx(from, slot));
+        return;
+    }
+    jl_datatype_t *eltype = (jl_datatype_t*)eltype_val;
+
+    // Compute element index from byte offset
+    jl_genericmemory_t *mem = (jl_genericmemory_t*)from;
+    size_t elsize = memtype->layout->size;
+    size_t index = 0;
+    if (elsize > 0)
+        index = ((char*)elem_begin - (char*)mem->ptr) / elsize;
+
+    // Build "[index].fieldpath" following the pattern of _fieldpath_for_slot
+    ios_t path;
+    ios_mem(&path, 128);
+    ios_printf(&path, "[%zu].", index);
+
+    void *obj = elem_begin;
+    jl_datatype_t *objtype = eltype;
+    while (1) {
+        int i = gc_slot_to_fieldidx(obj, slot, objtype);
+        if (jl_is_tuple_type((jl_value_t*)objtype) || jl_is_namedtuple_type((jl_value_t*)objtype)) {
+            ios_printf(&path, "[%d]", i);
+        }
+        else {
+            jl_svec_t *field_names = jl_field_names(objtype);
+            jl_sym_t *name = (jl_sym_t*)jl_svecref(field_names, i);
+            ios_puts(jl_symbol_name(name), &path);
+        }
+        if (!jl_field_isptr(objtype, i)) {
+            ios_putc('.', &path);
+            obj = (void*)((char*)obj + jl_field_offset(objtype, i));
+            objtype = (jl_datatype_t*)jl_field_type_concrete(objtype, i);
+        }
+        else {
+            break;
+        }
+    }
+
+    ios_putc('\0', &path);
+    size_t name_idx = st_find_or_serialize(&g_snapshot->names, g_snapshot->strings,
+                                           (const char*)path.buf);
+    ios_close(&path);
+    _record_gc_edge("property", from, to, name_idx);
+}
+
 void _gc_heap_snapshot_record_object_edge(jl_value_t *from, jl_value_t *to, void *slot) JL_NOTSAFEPOINT
 {
     ios_t path;

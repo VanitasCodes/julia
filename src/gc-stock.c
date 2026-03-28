@@ -1902,7 +1902,7 @@ STATIC_INLINE void gc_mark_memory8(jl_ptls_t ptls, jl_value_t *ary8_parent, jl_v
                         early_end = 1;
                         break;
                     }
-                    gc_heap_snapshot_record_array_edge(ary8_parent, slot);
+                    gc_heap_snapshot_record_array_edge_with_field(ary8_parent, slot, ary8_begin);
                 }
             }
             if (early_end)
@@ -1979,7 +1979,7 @@ STATIC_INLINE void gc_mark_memory16(jl_ptls_t ptls, jl_value_t *ary16_parent, jl
                         early_end = 1;
                         break;
                     }
-                    gc_heap_snapshot_record_array_edge(ary16_parent, slot);
+                    gc_heap_snapshot_record_array_edge_with_field(ary16_parent, slot, ary16_begin);
                 }
             }
             if (early_end)
