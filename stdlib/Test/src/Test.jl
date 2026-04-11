@@ -30,6 +30,7 @@ export detect_ambiguities, detect_unbound_args, detect_closure_boxes, detect_clo
 export GenericString, GenericSet, GenericDict, GenericArray, GenericOrder
 export TestSetException
 export TestLogger, LogRecord
+export set_max_failures, get_max_failures, get_failure_count, reset_failure_count
 
 using Random
 using Random: AbstractRNG, default_rng
@@ -40,6 +41,58 @@ using Base.ScopedValues: LazyScopedValue, ScopedValue, @with
 
 const global_fail_fast = OncePerProcess{Bool}() do
     return Base.get_bool_env("JULIA_TEST_FAILFAST", false)
+end
+
+# Global state for tracking test failures across testsets
+const global_failure_count = Threads.Atomic{Int}(0)
+const global_failure_limit = Threads.Atomic{Int}(typemax(Int))
+
+"""
+    set_max_failures(n::Integer)
+
+Set the maximum number of test failures (fails + errors) allowed before stopping.
+Default is `typemax(Int)` (no limit). Set to `0` to stop on first failure.
+
+!!! compat "Julia 1.14"
+    This function requires at least Julia 1.14.
+"""
+function set_max_failures(n::Integer)
+    n >= 0 || throw(ArgumentError("maxfailures must be non-negative, got $n"))
+    Threads.atomic_xchg!(global_failure_limit, Int(n))
+    return n
+end
+
+"""
+    get_max_failures()
+
+Get the current failure limit. Returns `typemax(Int)` if no limit is set.
+
+!!! compat "Julia 1.14"
+    This function requires at least Julia 1.14.
+"""
+get_max_failures() = Threads.atomic_add!(global_failure_limit, 0)
+
+"""
+    get_failure_count()
+
+Get the current count of test failures (fails + errors).
+
+!!! compat "Julia 1.14"
+    This function requires at least Julia 1.14.
+"""
+get_failure_count() = Threads.atomic_add!(global_failure_count, 0)
+
+"""
+    reset_failure_count()
+
+Reset the failure counter to zero. Called at the start of test runs.
+
+!!! compat "Julia 1.14"
+    This function requires at least Julia 1.14.
+"""
+function reset_failure_count()
+    Threads.atomic_xchg!(global_failure_count, 0)
+    return nothing
 end
 
 #-----------------------------------------------------------------------
@@ -1547,6 +1600,11 @@ extract_file(::Nothing) = nothing
 
 struct FailFastError <: Exception end
 
+struct MaxFailuresError <: Exception
+    limit::Int
+    count::Int
+end
+
 # For a broken result, simply store the result
 record(ts::DefaultTestSet, t::Broken) = ((@lock ts.results_lock push!(ts.results, t)); t)
 # For a passed result, do not store the result since it uses a lot of memory, unless
@@ -1580,6 +1638,9 @@ function record(ts::DefaultTestSet, t::Union{Fail, Error}; print_result::Bool=TE
     end
     @lock ts.results_lock push!(ts.results, t)
     ts.failfast && throw(FailFastError())
+    # check maxfailures limit; +1 because atomic_add! returns the old value
+    count = Threads.atomic_add!(global_failure_count, 1) + 1
+    count >= global_failure_limit[] && throw(MaxFailuresError(global_failure_limit[], count))
     return t
 end
 
@@ -2144,6 +2205,7 @@ trigger_test_failure_break(@nospecialize(err)) =
     ccall(:jl_test_failure_breakpoint, Cvoid, (Any,), err)
 
 is_failfast_error(err::FailFastError) = true
+is_failfast_error(err::MaxFailuresError) = true
 is_failfast_error(err::LoadError) = is_failfast_error(err.error) # handle `include` barrier
 is_failfast_error(err) = false
 
@@ -2252,7 +2314,7 @@ function testset_beginend_call(args, tests, source)
             # error in this test set
             trigger_test_failure_break(err)
             if is_failfast_error(err)
-                get_testset_depth() > 0 ? rethrow() : failfast_print()
+                get_testset_depth() > 0 ? rethrow() : (err isa MaxFailuresError ? maxfailures_print(err) : failfast_print())
             else
                 record(ts, Error(:nontest_error, Expr(:tuple), err, Base.current_exceptions(), $(QuoteNode(source)), nothing))
             end
@@ -2273,6 +2335,11 @@ end
 function failfast_print()
     printstyled("\nFail-fast enabled:"; color = Base.error_color(), bold=true)
     printstyled(" Fail or Error occurred\n\n"; color = Base.error_color())
+end
+
+function maxfailures_print(err::MaxFailuresError)
+    printstyled("\nMax failures reached:"; color = Base.error_color(), bold=true)
+    printstyled(" $(err.count) failures (limit=$(err.limit))\n\n"; color = Base.error_color())
 end
 
 """
@@ -2332,7 +2399,7 @@ function testset_forloop(args, testloop, source)
             # error in this test set
             trigger_test_failure_break(err)
             if is_failfast_error(err)
-                get_testset_depth() > 0 ? rethrow() : failfast_print()
+                get_testset_depth() > 0 ? rethrow() : (err isa MaxFailuresError ? maxfailures_print(err) : failfast_print())
             else
                 record(ts, Error(:nontest_error, Expr(:tuple), err, Base.current_exceptions(), $(QuoteNode(source)), nothing))
             end
