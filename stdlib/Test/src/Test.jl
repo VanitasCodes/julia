@@ -30,7 +30,6 @@ export detect_ambiguities, detect_unbound_args, detect_closure_boxes, detect_clo
 export GenericString, GenericSet, GenericDict, GenericArray, GenericOrder
 export TestSetException
 export TestLogger, LogRecord
-export set_max_failures, get_max_failures, get_failure_count, reset_failure_count
 
 using Random
 using Random: AbstractRNG, default_rng
@@ -43,57 +42,9 @@ const global_fail_fast = OncePerProcess{Bool}() do
     return Base.get_bool_env("JULIA_TEST_FAILFAST", false)
 end
 
-# Global state for tracking test failures across testsets
+# Global state for maxfailures tracking (0 = disabled)
 const global_failure_count = Threads.Atomic{Int}(0)
-const global_failure_limit = Threads.Atomic{Int}(typemax(Int))
-
-"""
-    set_max_failures(n::Integer)
-
-Set the maximum number of test failures (fails + errors) allowed before stopping.
-Default is `typemax(Int)` (no limit). Set to `0` to stop on first failure.
-
-!!! compat "Julia 1.14"
-    This function requires at least Julia 1.14.
-"""
-function set_max_failures(n::Integer)
-    n >= 0 || throw(ArgumentError("maxfailures must be non-negative, got $n"))
-    Threads.atomic_xchg!(global_failure_limit, Int(n))
-    return n
-end
-
-"""
-    get_max_failures()
-
-Get the current failure limit. Returns `typemax(Int)` if no limit is set.
-
-!!! compat "Julia 1.14"
-    This function requires at least Julia 1.14.
-"""
-get_max_failures() = Threads.atomic_add!(global_failure_limit, 0)
-
-"""
-    get_failure_count()
-
-Get the current count of test failures (fails + errors).
-
-!!! compat "Julia 1.14"
-    This function requires at least Julia 1.14.
-"""
-get_failure_count() = Threads.atomic_add!(global_failure_count, 0)
-
-"""
-    reset_failure_count()
-
-Reset the failure counter to zero. Called at the start of test runs.
-
-!!! compat "Julia 1.14"
-    This function requires at least Julia 1.14.
-"""
-function reset_failure_count()
-    Threads.atomic_xchg!(global_failure_count, 0)
-    return nothing
-end
+global_failure_limit::Int = 0
 
 #-----------------------------------------------------------------------
 
@@ -1638,9 +1589,11 @@ function record(ts::DefaultTestSet, t::Union{Fail, Error}; print_result::Bool=TE
     end
     @lock ts.results_lock push!(ts.results, t)
     ts.failfast && throw(FailFastError())
-    # check maxfailures limit; +1 because atomic_add! returns the old value
-    count = Threads.atomic_add!(global_failure_count, 1) + 1
-    count >= global_failure_limit[] && throw(MaxFailuresError(global_failure_limit[], count))
+    limit = global_failure_limit
+    if limit > 0
+        count = Threads.atomic_add!(global_failure_count, 1) + 1
+        count >= limit && throw(MaxFailuresError(limit, count))
+    end
     return t
 end
 

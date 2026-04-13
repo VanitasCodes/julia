@@ -1958,7 +1958,7 @@ end
             write(f,
             """
             using Test
-            Test.reset_failure_count()
+            Test.global_failure_count[] = 0
             @testset "outer" begin
                 @testset "First" begin
                     @test false
@@ -1981,8 +1981,8 @@ end
             write(f,
             """
             using Test
-            Test.reset_failure_count()
-            Test.set_max_failures(1)
+            Test.global_failure_count[] = 0
+            Test.global_failure_limit = 1
             @testset "outer" begin
                 @testset "First" begin
                     @test false
@@ -2004,8 +2004,8 @@ end
             write(f,
             """
             using Test
-            Test.reset_failure_count()
-            Test.set_max_failures(2)
+            Test.global_failure_count[] = 0
+            Test.global_failure_limit = 2
             @testset "outer" begin
                 @testset "First" begin
                     @test false
@@ -2028,8 +2028,8 @@ end
             write(f,
             """
             using Test
-            Test.reset_failure_count()
-            Test.set_max_failures(1)
+            Test.global_failure_count[] = 0
+            Test.global_failure_limit = 1
             @testset "outer" begin
                 @testset "First" begin
                     @test error("oops")
@@ -2046,16 +2046,13 @@ end
             @test !occursin(r"Test Summary:.*\n.*Second", result)
         end
     end
-    @testset "invalid maxfailures throws" begin
-        @test_throws ArgumentError Test.set_max_failures(-1)
-    end
     @testset "process exits with failure" begin
         mktemp() do f, _
             write(f,
             """
             using Test
-            Test.reset_failure_count()
-            Test.set_max_failures(1)
+            Test.global_failure_count[] = 0
+            Test.global_failure_limit = 1
             @testset "outer" begin
                 @testset "First" begin
                     @test false
