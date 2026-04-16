@@ -2266,8 +2266,9 @@ function testset_beginend_call(args, tests, source)
             # something in the test block threw an error. Count that as an
             # error in this test set
             trigger_test_failure_break(err)
-            if is_failfast_error(err)
-                get_testset_depth() > 0 ? rethrow() : (err isa MaxFailuresError ? maxfailures_print(err) : failfast_print())
+            real_err = err isa LoadError ? err.error : err
+            if is_failfast_error(real_err)
+                get_testset_depth() > 0 ? rethrow() : (real_err isa MaxFailuresError ? maxfailures_print(real_err) : failfast_print())
             else
                 record(ts, Error(:nontest_error, Expr(:tuple), err, Base.current_exceptions(), $(QuoteNode(source)), nothing))
             end
@@ -2351,8 +2352,9 @@ function testset_forloop(args, testloop, source)
             # Something in the test block threw an error. Count that as an
             # error in this test set
             trigger_test_failure_break(err)
-            if is_failfast_error(err)
-                get_testset_depth() > 0 ? rethrow() : (err isa MaxFailuresError ? maxfailures_print(err) : failfast_print())
+            real_err = err isa LoadError ? err.error : err
+            if is_failfast_error(real_err)
+                get_testset_depth() > 0 ? rethrow() : (real_err isa MaxFailuresError ? maxfailures_print(real_err) : failfast_print())
             else
                 record(ts, Error(:nontest_error, Expr(:tuple), err, Base.current_exceptions(), $(QuoteNode(source)), nothing))
             end
