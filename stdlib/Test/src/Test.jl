@@ -42,9 +42,14 @@ const global_fail_fast = OncePerProcess{Bool}() do
     return Base.get_bool_env("JULIA_TEST_FAILFAST", false)
 end
 
-# Global state for maxfailures tracking (0 = disabled)
 const global_failure_count = Threads.Atomic{Int}(0)
-global_failure_limit::Int = 0
+const global_failure_limit = OncePerProcess{Union{Nothing,Int}}() do
+    val = get(ENV, "JULIA_TEST_MAXFAILURES", "")
+    isempty(val) && return nothing
+    n = tryparse(Int, val)
+    (n === nothing || n < 0) && return nothing
+    return n
+end
 
 #-----------------------------------------------------------------------
 
@@ -1589,8 +1594,8 @@ function record(ts::DefaultTestSet, t::Union{Fail, Error}; print_result::Bool=TE
     end
     @lock ts.results_lock push!(ts.results, t)
     ts.failfast && throw(FailFastError())
-    limit = global_failure_limit
-    if limit > 0
+    limit = global_failure_limit()
+    if limit !== nothing
         count = Threads.atomic_add!(global_failure_count, 1) + 1
         count >= limit && throw(MaxFailuresError(limit, count))
     end
